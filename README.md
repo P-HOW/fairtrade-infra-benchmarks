@@ -55,3 +55,68 @@ After setting the variable, you can run the deployment with the Sepolia network:
 ```shell
 npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
 ```
+
+# Fairtrade Infra Benchmarks – Wallet Setup
+
+This section explains how to generate and configure a **test-only** wallet
+for running benchmarks against Optimism Sepolia (and other testnets).
+Never use a real / mainnet wallet here.
+
+---
+
+## 1. Using the built-in generator script (recommended)
+
+1. Run the wallet generator from the project root:
+
+   ```bash
+   npm run gen:test-wallet
+   # or
+   npx tsx scripts/gen-test-wallet.ts
+   ```
+
+2. The script will print something like:
+
+   ```text
+   === New test wallet generated ===
+
+   Address:
+     0x1234...
+
+   Private key (keep this secret, even for testnets):
+     0xabc...
+
+   Add this line to your .env file:
+
+   OP_SEPOLIA_PRIVATE_KEY=0xabc...
+   ```
+
+3. Create or edit your `.env` file and paste the suggested line:
+
+   ```env
+   OP_SEPOLIA_PRIVATE_KEY=0xabc...   # from the generator
+   ```
+
+4. Fund the printed **address** (not the private key) with test ETH on
+   Optimism Sepolia from a faucet.
+
+---
+
+## 2. Using an external wallet (e.g. MetaMask)
+
+1. In MetaMask (or a similar wallet), create a new **throwaway** account.
+2. Export that account’s private key.
+3. Add it to your `.env` file:
+
+   ```env
+   OP_SEPOLIA_PRIVATE_KEY=0x<exported_private_key>
+   ```
+
+4. Fund that address with test ETH on the appropriate testnet.
+
+---
+
+## 3. Security Notes
+
+- `.env` is already in `.gitignore`, but double-check before committing.
+- Treat every private key as sensitive, even on testnets.
+- Do **not** reuse these accounts on mainnet or with real funds.
