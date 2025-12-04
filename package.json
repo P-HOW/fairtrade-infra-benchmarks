@@ -4,6 +4,7 @@
   "description": "",
   "main": "dist/index.js",
   "scripts": {
+    "gen:test-wallet": "tsx scripts/gen-test-wallet.ts",
     "build": "tsc"
   },
   "devDependencies": {
