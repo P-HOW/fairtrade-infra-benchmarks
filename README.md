@@ -120,3 +120,13 @@ Never use a real / mainnet wallet here.
 - `.env` is already in `.gitignore`, but double-check before committing.
 - Treat every private key as sensitive, even on testnets.
 - Do **not** reuse these accounts on mainnet or with real funds.
+
+### Deployed Contracts – Optimism Sepolia
+
+| Contract         | Address                                      | Notes              |
+|------------------|----------------------------------------------|--------------------|
+| ActorRegistry    | `0xFb451B3Bfb497C54719d0DB354a502a9D9cE38C1` | Actor/role registry |
+| DocumentRegistry | `0xBEb8140eeaf2f23916dA88F8F0886827a0f5145c` | IPFS doc anchors    |
+| ProcessManager   | `0xeD7AA6c4B1fA3FFCEC378dcFEAc0406540F5078c` | Batch state machine |
+| CidRollup        | `0xC6d171F707bA43BdF490362a357D975B76976264` | CID batch events    |
+| PaymentRouter    | `0x87d6582186520Ca818F0E4e3acc0826e7bAeaCfe` | Fee distribution    |
