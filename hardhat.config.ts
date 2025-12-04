@@ -1,8 +1,9 @@
-import hardhatToolboxMochaEthersPlugin from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
+import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
 import { configVariable, defineConfig } from "hardhat/config";
 
 export default defineConfig({
-  plugins: [hardhatToolboxMochaEthersPlugin],
+  plugins: [hardhatToolboxMochaEthers],
+
   solidity: {
     profiles: {
       default: {
@@ -19,6 +20,13 @@ export default defineConfig({
       },
     },
   },
+
+  // 👇 tell Hardhat that Solidity files live in ./contracts
+  paths: {
+    sources: "./contracts",
+    tests: "./test",
+  },
+
   networks: {
     hardhatMainnet: {
       type: "edr-simulated",
@@ -33,6 +41,12 @@ export default defineConfig({
       chainType: "l1",
       url: configVariable("SEPOLIA_RPC_URL"),
       accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
+    },
+    opSepolia: {
+      type: "http",
+      chainType: "op",
+      url: configVariable("OP_SEPOLIA_RPC_URL"),
+      accounts: [configVariable("OP_SEPOLIA_PRIVATE_KEY")],
     },
   },
 });
