@@ -130,3 +130,41 @@ Never use a real / mainnet wallet here.
 | ProcessManager   | `0xeD7AA6c4B1fA3FFCEC378dcFEAc0406540F5078c` | Batch state machine |
 | CidRollup        | `0xC6d171F707bA43BdF490362a357D975B76976264` | CID batch events    |
 | PaymentRouter    | `0x87d6582186520Ca818F0E4e3acc0826e7bAeaCfe` | Fee distribution    |
+
+OP Sepolia faucet distribution utility
+======================================
+
+Script
+------
+- scripts/distribute-op-faucet.ts
+
+Prerequisites
+-------------
+- .env must define:
+   - OP_SEPOLIA_RPC_URL – Optimism Sepolia RPC endpoint
+   - OP_SEPOLIA_PRIVATE_KEY – private key of the funder wallet (with OP Sepolia ETH)
+
+Usage
+-----
+Run from the project root:
+
+npx hardhat run scripts/distribute-op-faucet.ts --network opSepolia
+
+What it does
+------------
+- On the first run:
+   - Generates TARGET_WALLET_COUNT test wallets.
+   - Saves them to op-sepolia-faucet-wallets.json.
+- On every run:
+   - Reads the funder balance from the network.
+   - Keeps a safety gas buffer (GAS_BUFFER_WEI).
+   - Divides the remaining balance evenly across wallets with funded === false.
+   - Sends funds and marks those wallets as funded in op-sepolia-faucet-wallets.json.
+
+Tunable parameters
+------------------
+You can change these constants at the top of scripts/distribute-op-faucet.ts:
+
+- TARGET_WALLET_COUNT – how many wallets to generate and fund in total.
+- GAS_BUFFER_WEI – minimum ETH (in wei) to keep on the funder wallet as a safety buffer.
+- PER_TX_DELAY_MS – delay (in milliseconds) between transactions to avoid RPC rate limits.
