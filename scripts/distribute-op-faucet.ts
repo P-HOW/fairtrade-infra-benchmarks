@@ -23,7 +23,7 @@ const TARGET_WALLET_COUNT = 3000;
 // Safety buffer so we don't accidentally drain the funder completely.
 const GAS_BUFFER_WEI = ethers.parseEther("0.05");
 
-// Optional small delay between txs to be nicer to the free RPC
+// Optional small delay between txs to be nicer to the RPC
 const PER_TX_DELAY_MS = 300; // tweak if still rate-limited
 
 interface FaucetWallet {
@@ -62,20 +62,26 @@ async function saveFaucetState(state: FaucetState): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------
-// Helpers: rate-limit / gas-error aware RPC wrapper
+// Helpers: rate-limit / backend-error / gas-error aware RPC wrapper
 // -----------------------------------------------------------------------------
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isRateLimitError(err: any): boolean {
+function isRateLimitOrBackendError(err: any): boolean {
     const code = err?.error?.code ?? err?.code;
     const msg: string | undefined = err?.error?.message ?? err?.message;
 
-    if (code === -32016) return true;
-    if (typeof msg === "string" && msg.includes("exceeded its requests per second capacity")) {
-        return true;
+    // OP 公共 RPC 的典型错误码：
+    // -32016: requests per second capacity exceeded
+    // -32011: no backend is currently healthy to serve traffic
+    if (code === -32016 || code === -32011) return true;
+
+    if (typeof msg === "string") {
+        const lower = msg.toLowerCase();
+        if (lower.includes("exceeded its requests per second capacity")) return true;
+        if (lower.includes("no backend is currently healthy to serve traffic")) return true;
     }
     return false;
 }
@@ -99,10 +105,10 @@ async function withRpcRetry<T>(fn: () => Promise<T>, label: string): Promise<T> 
         try {
             return await fn();
         } catch (err: any) {
-            if (isRateLimitError(err) && attempt < maxAttempts) {
-                const delayMs = Math.min(10_000, 1000 * 2 ** attempt); // 1s,2s,...,max 10s
+            if (isRateLimitOrBackendError(err) && attempt < maxAttempts) {
+                const delayMs = Math.min(10_000, 1000 * 2 ** attempt); // 1s,2s,4s,...,max 10s
                 console.log(
-                    `   ⚠️ RPC rate limit on "${label}", sleeping ${delayMs} ms then retrying (attempt ${
+                    `   ⚠️ RPC rate/back-end issue on "${label}", sleeping ${delayMs} ms then retrying (attempt ${
                         attempt + 1
                     }/${maxAttempts})`,
                 );
@@ -181,7 +187,7 @@ async function main() {
         return;
     }
 
-    // Fetch current funder balance from network with rate-limit aware wrapper
+    // Fetch current funder balance from network with rate/ backend aware wrapper
     const currentBalance = await withRpcRetry(
         () => provider.getBalance(funderAddress),
         "getBalance(initial)",
@@ -217,7 +223,7 @@ async function main() {
         const { wallet: w, index: globalIndex } = remaining[i];
         const humanIndex = globalIndex + 1; // 1-based index for logs
 
-        // Re-check funder balance before each transfer (with rate-limit handling)
+        // Re-check funder balance before each transfer (with retry)
         const latestBalance = await withRpcRetry(
             () => provider.getBalance(funderAddress),
             "getBalance(per-wallet)",
@@ -235,7 +241,7 @@ async function main() {
         );
 
         try {
-            // sendTransaction itself may be rate-limited
+            // sendTransaction itself may be rate-limited or backend-down
             const tx = await withRpcRetry(
                 () =>
                     funder.sendTransaction({
