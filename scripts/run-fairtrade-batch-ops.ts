@@ -1,6 +1,6 @@
 // scripts/run-fairtrade-batch-ops.ts
 //
-// Run one full FairTrade coffee-batch scenario and measure gas per operation.
+// Run one full FairTrade coffee-batch scenario and measure gas & fee per operation.
 // For each StepType s in S = {Produced, Processed, Shipped, Received, AtRetail, Sold},
 // we send n_s CidRollup.submitCidBatch(...) transactions, each anchoring ONE CidEvent,
 // and wait for confirmation before sending the next tx.
@@ -87,6 +87,9 @@ const OPS_PER_STEP: Record<StepType, number> = {
 // Role = Producer (1) from FairtradeTypes.Role
 const ROLE_PRODUCER = 1;
 
+// Fixed ETH price in USD (for fee reporting)
+const ETH_PRICE_USD = 3047;
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -141,12 +144,8 @@ function buildCidEvent(
     const productId = toBytes32(`batch-${batchTag}`); // same productId for whole batch
 
     const stepLabel = STEP_LABEL[step];
-    const stepId = toBytes32(
-        `batch-${batchTag}-step-${stepLabel}-${opIndex}`,
-    );
-    const cidHash = toBytes32(
-        `cid-${batchTag}-${stepLabel}-${opIndex}`,
-    );
+    const stepId = toBytes32(`batch-${batchTag}-step-${stepLabel}-${opIndex}`);
+    const cidHash = toBytes32(`cid-${batchTag}-${stepLabel}-${opIndex}`);
 
     return {
         productId,
@@ -154,6 +153,20 @@ function buildCidEvent(
         cidHash,
         stepType: step,
     };
+}
+
+// Safely extract gas price from receipt / tx
+function getGasPrice(
+    receipt: ethers.TransactionReceipt | null,
+    tx: ethers.TransactionResponse,
+): bigint {
+    const rAny = receipt as any;
+    return (
+        (receipt?.gasPrice as bigint | undefined) ??
+        (rAny?.effectiveGasPrice as bigint | undefined) ??
+        (tx.gasPrice as bigint | undefined) ??
+        0n
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -210,9 +223,11 @@ async function main() {
 
     let totalOps = 0;
     let totalGas = 0n;
+    let totalFeeWei = 0n;
 
     console.log("=== Starting FairTrade batch walkthrough ===");
     console.log(`Batch tag: ${batchTag}`);
+    console.log(`Assumed ETH price: ${ETH_PRICE_USD} USD/ETH`);
     console.log("");
 
     for (const step of STEP_ORDER) {
@@ -233,14 +248,23 @@ async function main() {
             );
             const receipt = await tx.wait();
             const gasUsed = receipt?.gasUsed ?? 0n;
+            const gasPrice = getGasPrice(receipt, tx);
+            const feeWei = gasUsed * gasPrice;
+
+            const feeEthStr = ethers.formatEther(feeWei); // exact decimal string
+            const feeUsdApprox =
+                parseFloat(feeEthStr) * ETH_PRICE_USD; // for display only
 
             console.log(
                 `      ✓ confirmed in block ${receipt?.blockNumber?.toString()} ` +
-                `gasUsed=${gasUsed.toString()}`,
+                `gasUsed=${gasUsed.toString()} ` +
+                `gasPrice=${gasPrice.toString()} wei ` +
+                `fee=${feeEthStr} ETH (~$${feeUsdApprox.toFixed(4)})`,
             );
 
             totalOps += 1;
             totalGas += gasUsed;
+            totalFeeWei += feeWei;
         }
 
         console.log("");
@@ -249,9 +273,34 @@ async function main() {
     console.log("=== Batch walkthrough complete ===");
     console.log(`Total CID-anchor operations (∑_s n_s): ${totalOps}`);
     console.log(`Total gas over all ops:               ${totalGas.toString()}`);
+
     if (totalOps > 0) {
         const avgGasPerOp = totalGas / BigInt(totalOps);
-        console.log(`Average gas per CID anchor:          ${avgGasPerOp.toString()}`);
+        console.log(
+            `Average gas per CID anchor:          ${avgGasPerOp.toString()}`,
+        );
+    }
+
+    const totalFeeEthStr = ethers.formatEther(totalFeeWei);
+    const totalFeeUsdApprox =
+        parseFloat(totalFeeEthStr) * ETH_PRICE_USD;
+
+    console.log(
+        `Total tx fee over all ops:            ${totalFeeWei.toString()} wei ` +
+        `(${totalFeeEthStr} ETH, ~$${totalFeeUsdApprox.toFixed(4)})`,
+    );
+
+    if (totalOps > 0) {
+        const avgFeeWei = totalFeeWei / BigInt(totalOps);
+        const avgFeeEthStr = ethers.formatEther(avgFeeWei);
+        const avgFeeUsdApprox =
+            parseFloat(avgFeeEthStr) * ETH_PRICE_USD;
+
+        console.log(
+            `Average fee per CID anchor:          ${avgFeeEthStr} ETH, ~$${avgFeeUsdApprox.toFixed(
+                4,
+            )}`,
+        );
     }
 }
 

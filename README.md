@@ -171,6 +171,8 @@ You can change these constants at the top of scripts/distribute-op-faucet.ts:
 
 ## FairTrade Batch Operation Walkthrough
 
+## FairTrade Batch Operation Walkthrough
+
 Script: `scripts/run-fairtrade-batch-ops.ts`  
 Network: Optimism Sepolia  
 RPC: `https://opt-sepolia.g.alchemy.com/v2/wehjZRRb7NBxavvr5DW5c`
@@ -182,22 +184,24 @@ Contracts used:
 Sender (and registered actor):  
 `0xde701e967ea625451819f95bC461e9Fcf8c507df`
 
-Batch tag for this run: `1765113054419`
+Batch tag for this run: `1765113980728`  
+Assumed ETH price: `3047 USD/ETH`  
+Observed gas price during the run: `1,000,250 wei` per gas unit.
 
-The script walks a single **traceable coffee batch** through the six FairTrade step types, anchoring one CID-event per on-chain transaction and waiting for confirmation after each tx. This directly realises the per-batch model used in the paper (∑ₛ nₛ = 13 CID anchors).
+The script walks a single **traceable coffee batch** through the six FairTrade step types, anchoring one CID event per on-chain transaction and waiting for confirmation after each tx. This directly realises the per-batch model used in the paper (∑ₛ nₛ = 13 CID anchors).
 
 ---
 
 ### Per-step summary
 
-| StepType   | Enum value | nₛ (ops per batch) | # tx sent | Block range        | Avg gas / tx | Gas range    |
-|-----------:|-----------:|--------------------:|---------:|--------------------|-------------:|-------------:|
-| Produced   | 1          | 1                  | 1        | 36,655,258         | 62,847       | 62,847       |
-| Processed  | 2          | 2                  | 2        | 36,655,261–36,655,263 | 62,841    | 62,835–62,847 |
-| Shipped    | 3          | 4                  | 4        | 36,655,263–36,655,266 | 62,838    | 62,823–62,847 |
-| Received   | 4          | 4                  | 4        | 36,655,269–36,655,274 | 62,844    | 62,835–62,847 |
-| AtRetail   | 5          | 1                  | 1        | 36,655,276         | 62,847       | 62,847       |
-| Sold       | 6          | 1                  | 1        | 36,655,276         | 62,847       | 62,847       |
+| StepType  | Enum value | nₛ (ops per batch) | # tx sent | Block range          | Avg gas / tx | Gas range      |
+|----------:|-----------:|--------------------:|---------:|----------------------|-------------:|---------------:|
+| Produced  | 1          | 1                   | 1        | 36,655,721           | 62,847       | 62,847         |
+| Processed | 2          | 2                   | 2        | 36,655,724–36,655,726 | 62,841      | 62,835–62,847   |
+| Shipped   | 3          | 4                   | 4        | 36,655,726–36,655,729 | 62,844      | 62,835–62,847   |
+| Received  | 4          | 4                   | 4        | 36,655,731–36,655,738 | 62,838      | 62,835–62,847   |
+| AtRetail  | 5          | 1                   | 1        | 36,655,741           | 62,835       | 62,835         |
+| Sold      | 6          | 1                   | 1        | 36,655,741           | 62,847       | 62,847         |
 
 All transactions were confirmed successfully, with gas usage tightly concentrated around **≈ 6.28 × 10⁴ gas** per CID-anchor event.
 
@@ -205,10 +209,12 @@ All transactions were confirmed successfully, with gas usage tightly concentrate
 
 ### Global metrics for the batch
 
-| Metric                                  | Value      |
-|----------------------------------------|-----------:|
-| Total CID-anchor operations ∑ₛ nₛ      | **13**     |
-| Total gas over all operations          | **816,951** |
-| Average gas per CID anchor             | **62,842** |
+| Metric                                      | Value                                              |
+|--------------------------------------------|---------------------------------------------------:|
+| Total CID-anchor operations ∑ₛ nₛ          | **13**                                             |
+| Total gas over all operations              | **816,939** gas                                    |
+| Average gas per CID anchor                 | **62,841** gas                                     |
+| Total tx fee over all operations           | **0.00000081714323475 ETH** (≈ **$0.0025**)        |
+| Average fee per CID anchor                 | **0.000000062857171903 ETH** (≈ **$0.00019**)      |
 
-This single-batch walkthrough provides a concrete, chain-level realisation of the theoretical model used in Section 4.8: a realistic FairTrade coffee batch generates 13 CID-anchor events across the six lifecycle steps, each costing ~6.3×10⁴ gas on Optimism Sepolia under the current contract design.
+This single-batch walkthrough provides a concrete, chain-level realisation of the theoretical model used in Section 4.8: a realistic FairTrade coffee batch generates 13 CID-anchor events across the six lifecycle steps, each costing roughly **6.3 × 10⁴ gas** and **6.3 × 10⁻⁸ ETH** on Optimism Sepolia under the current contract design.
