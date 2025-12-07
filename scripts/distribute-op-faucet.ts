@@ -17,11 +17,11 @@ import { promises as fs } from "fs";
 import path from "path";
 import { Wallet, JsonRpcProvider, ethers } from "ethers";
 
-const FAUCET_STATE_FILE = path.join(process.cwd(), "op-sepolia-faucet-wallets.json");
-const TARGET_WALLET_COUNT = 3000;
+const FAUCET_STATE_FILE = path.join(process.cwd(), "op-sepolia-faucet-wallets-batch.json");
+const TARGET_WALLET_COUNT = 50;
 
 // Safety buffer so we don't accidentally drain the funder completely.
-const GAS_BUFFER_WEI = ethers.parseEther("0.05");
+const GAS_BUFFER_WEI = ethers.parseEther("0.005");
 
 // Optional small delay between txs to be nicer to the RPC
 const PER_TX_DELAY_MS = 300; // tweak if still rate-limited
@@ -132,7 +132,7 @@ async function ensureWallets(): Promise<FaucetState> {
         return existing;
     }
 
-    console.log("No valid faucet state found, generating 3000 wallets...");
+    console.log("No valid faucet state found, generating "+TARGET_WALLET_COUNT+" wallets...");
 
     const wallets: FaucetWallet[] = [];
     for (let i = 0; i < TARGET_WALLET_COUNT; i++) {

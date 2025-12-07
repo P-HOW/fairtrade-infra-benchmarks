@@ -1,145 +1,138 @@
-// scripts/benchmark-cid-batch.ts
+// scripts/cid-anchor-multiwallet-30s.ts
 //
-// Send a single CidRollup.submitCidBatch() with N CidEvent entries.
+// Send as many 400-CID anchor batches as possible in ~30 seconds,
+// using many pre-generated wallets and multiple private RPC providers.
 //
-// - Uses OP_SEPOLIA_RPC_URL and OP_SEPOLIA_PRIVATE_KEY from .env
-// - Uses the already-deployed contracts on OP Sepolia:
-//     * ActorRegistry: 0xFb451B3Bfb497C54719d0DB354a502a9D9cE38C1
-//     * CidRollup:     0xC6d171F707bA43BdF490362a357D975B76976264
-// - Ensures the caller wallet is a registered ACTIVE actor in ActorRegistry
-//   (auto-registers as a Producer if not).
-// - Builds a batch of N synthetic CidEvent structs (default 500)
-// - Each run uses a unique RUN_ID so (productId, stepId) pairs are never reused,
-//   avoiding "step already anchored" revert when you re-run the script.
-// - Calls submitCidBatch(events) and logs timing in milliseconds.
+// - Wallets are loaded from op-sepolia-faucet-wallets-batch.json
+//   (same format as previous faucet scripts: { address, privateKey, funded }).
+// - Only wallets with funded === true are used.
+// - Each wallet sends AT MOST ONE submitCidBatch(...) tx.
+// - Each tx anchors BATCH_SIZE synthetic CIDs (default 400).
+// - RPC endpoints are read from OP_SEPOLIA_PRIVATE_RPCS_JSON (JSON array).
+// - For each RPC, we spawn WORKERS_PER_RPC async workers (default 10).
+// - Workers:
+//     * take the next funded wallet
+//     * build a unique CID batch (using a RUN_ID prefix)
+//     * send cidRollup.submitCidBatch(events)
+//     * DO NOT await .wait() – just log the tx hash and move on.
+// - The sending loop stops after DURATION_MS (default 30_000 ms)
+//   or when we run out of funded wallets.
 //
 // Usage:
-//   npx tsx scripts/benchmark-cid-batch.ts
-//   # or
-//   npx hardhat run scripts/benchmark-cid-batch.ts --network opSepolia
+//   npx tsx scripts/cid-anchor-multiwallet-30s.ts
 //
-// Optional env:
-//   CID_BATCH_SIZE=500
-//   CID_RUN_ID=some-string   # if you want deterministic runs; otherwise Date.now() is used
+// Env:
+//   OP_SEPOLIA_PRIVATE_RPCS_JSON=[ "...", "..." ]
+//   BATCH_SIZE (optional, default 400)
+//   DURATION_MS (optional, default 30000)
+//   WORKERS_PER_RPC (optional, default 10)
+//   CID_RUN_ID (optional, default Date.now())
+//   FAUCET_STATE_FILE (optional, default ./op-sepolia-faucet-wallets-batch.json)
 
 import "dotenv/config";
+import { promises as fs } from "fs";
+import path from "path";
 import { JsonRpcProvider, Wallet, ethers } from "ethers";
 
-// Hard-coded deployed addresses (OP Sepolia)
-const ACTOR_REGISTRY_ADDRESS = "0xFb451B3Bfb497C54719d0DB354a502a9D9cE38C1";
+// -----------------------------------------------------------------------------
+// Config
+// -----------------------------------------------------------------------------
+
 const CID_ROLLUP_ADDRESS = "0xC6d171F707bA43BdF490362a357D975B76976264";
 
 // Artifacts – relies on tsconfig: "resolveJsonModule": true
-import actorRegistryArtifact from "../artifacts/contracts/ActorRegistry.sol/ActorRegistry.json";
 import cidRollupArtifact from "../artifacts/contracts/CidRollup.sol/CidRollup.json";
 
-// Batch size (default 500, override via env CID_BATCH_SIZE)
-const BATCH_SIZE = Number(process.env.CID_BATCH_SIZE ?? "1023");
+const BATCH_SIZE = Number(process.env.BATCH_SIZE ?? "200");
+const DURATION_MS = Number(process.env.DURATION_MS ?? "30000");
+const WORKERS_PER_RPC = Number(process.env.WORKERS_PER_RPC ?? "3");
+const RUN_ID_BASE = process.env.CID_RUN_ID ?? `${Date.now()}`;
 
-// Unique run identifier to avoid replay on (productId, stepId).
-// If CID_RUN_ID is not set, we just use current timestamp.
-const RUN_ID = process.env.CID_RUN_ID ?? `${Date.now()}`;
-
-// Role value from FairtradeTypes.Role (Producer = 1)
-const ROLE_PRODUCER = 1;
+const FAUCET_STATE_FILE =
+    process.env.FAUCET_STATE_FILE ??
+    path.join(process.cwd(), "op-sepolia-faucet-wallets-batch.json");
 
 // -----------------------------------------------------------------------------
-// Helpers
+// Types & helpers
 // -----------------------------------------------------------------------------
+
+interface FaucetWallet {
+    address: string;
+    privateKey: string;
+    funded: boolean;
+}
+
+interface FaucetState {
+    wallets: FaucetWallet[];
+}
+
+type CidEvent = {
+    productId: string;
+    stepId: string;
+    cidHash: string;
+    stepType: number;
+};
 
 function toBytes32(label: string): string {
     return ethers.keccak256(ethers.toUtf8Bytes(label));
 }
 
-async function ensureRegisteredActor(
-    actorRegistry: ethers.Contract,
-    wallet: Wallet,
-): Promise<void> {
-    const addr = await wallet.getAddress();
-    const isActive: boolean = await actorRegistry.isActiveActor(addr);
-
-    if (isActive) {
-        console.log(`Actor already active in registry: ${addr}`);
-        return;
-    }
-
-    console.log(`Actor not registered, registering now as Producer: ${addr}`);
-
-    const orgIdHash = toBytes32("fairtrade-bench-org");
-    const metadataHash = toBytes32("fairtrade-bench-metadata");
-
-    const tx = await actorRegistry.registerActor(
-        orgIdHash,
-        addr,
-        ROLE_PRODUCER,
-        metadataHash,
-    );
-    console.log("  registerActor tx hash:", tx.hash);
-    const receipt = await tx.wait();
-    console.log(
-        "  registerActor confirmed in block",
-        receipt?.blockNumber?.toString(),
-    );
+// NEW: simple sleep helper
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// -----------------------------------------------------------------------------
-// Main
-// -----------------------------------------------------------------------------
+async function loadFaucetState(): Promise<FaucetWallet[]> {
+    const raw = await fs.readFile(FAUCET_STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
 
-async function main() {
-    const rpcUrl = process.env.OP_SEPOLIA_RPC_URL;
-    const privateKey = process.env.OP_SEPOLIA_PRIVATE_KEY;
+    const wallets = (Array.isArray(parsed)
+        ? (parsed as FaucetWallet[])
+        : (parsed as FaucetState).wallets) as FaucetWallet[];
 
-    if (!rpcUrl || !privateKey) {
+    return wallets ?? [];
+}
+
+function parsePrivateRpcs(): string[] {
+    const raw = process.env.OP_SEPOLIA_PRIVATE_RPCS_JSON;
+    if (!raw) {
+        throw new Error("OP_SEPOLIA_PRIVATE_RPCS_JSON is not set in .env");
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
         throw new Error(
-            "Missing OP_SEPOLIA_RPC_URL or OP_SEPOLIA_PRIVATE_KEY in .env",
+            `Failed to parse OP_SEPOLIA_PRIVATE_RPCS_JSON: ${(e as Error).message}`,
         );
     }
+    if (!Array.isArray(parsed)) {
+        throw new Error("OP_SEPOLIA_PRIVATE_RPCS_JSON must be a JSON array");
+    }
 
-    console.log("RPC URL:", rpcUrl);
+    const urls = (parsed as unknown[])
+        .filter((u) => typeof u === "string")
+        .map((u) => u as string)
+        .filter((u) => u.startsWith("http"));
 
-    const provider = new JsonRpcProvider(rpcUrl);
-    const wallet = new Wallet(privateKey, provider);
-    const sender = await wallet.getAddress();
+    if (urls.length === 0) {
+        throw new Error("OP_SEPOLIA_PRIVATE_RPCS_JSON has no HTTP URLs");
+    }
+    return urls;
+}
 
-    console.log("Sender address:", sender);
-    console.log("Batch size (CidEvent count):", BATCH_SIZE);
-    console.log("RUN_ID:", RUN_ID);
-    console.log("");
-
-    // Instantiate contracts
-    const actorRegistry = new ethers.Contract(
-        ACTOR_REGISTRY_ADDRESS,
-        (actorRegistryArtifact as any).abi,
-        wallet,
-    );
-
-    const cidRollup = new ethers.Contract(
-        CID_ROLLUP_ADDRESS,
-        (cidRollupArtifact as any).abi,
-        wallet,
-    );
-
-    // Ensure sender is a registered ACTIVE actor
-    await ensureRegisteredActor(actorRegistry, wallet);
-    console.log("");
-
-    // Build synthetic CidEvent entries
-    type CidEvent = {
-        productId: string;
-        stepId: string;
-        cidHash: string;
-        stepType: number;
-    };
-
+// Build a batch of synthetic CidEvent entries for this run+wallet
+function buildCidEvents(runTag: string, batchSize: number): CidEvent[] {
     const events: CidEvent[] = [];
-    for (let i = 0; i < BATCH_SIZE; i++) {
-        const productIndex = Math.floor(i / 10); // 10 steps per product just for variety
 
-        // Include RUN_ID so each script run gets unique (productId, stepId, cidHash)
-        const productId = toBytes32(`run-${RUN_ID}-product-${productIndex}`);
-        const stepId = toBytes32(`run-${RUN_ID}-step-${i}`);
-        const cidHash = toBytes32(`run-${RUN_ID}-cid-${i}`);
+    for (let i = 0; i < batchSize; i++) {
+        const productIndex = Math.floor(i / 10); // 10 steps per product, arbitrary
+
+        const productId = toBytes32(
+            `run-${runTag}-product-${productIndex}`,
+        );
+        const stepId = toBytes32(`run-${runTag}-step-${i}`);
+        const cidHash = toBytes32(`run-${runTag}-cid-${i}`);
 
         // StepType enum (1..6): Produced, Processed, Shipped, Received, AtRetail, Sold
         const stepType = ((i % 6) + 1) as number;
@@ -152,27 +145,133 @@ async function main() {
         });
     }
 
+    return events;
+}
+
+// -----------------------------------------------------------------------------
+// Main
+// -----------------------------------------------------------------------------
+
+async function main() {
+    const rpcUrls = parsePrivateRpcs();
+    console.log("Using private RPCs:");
+    rpcUrls.forEach((u, i) => console.log(`  [${i}] ${u}`));
+    console.log("");
+
+    const allWallets = await loadFaucetState();
+    const fundedWallets = allWallets.filter((w) => w.funded);
+
+    if (fundedWallets.length === 0) {
+        console.log("❌ No funded wallets found in faucet state file.");
+        return;
+    }
+
+    console.log(`Total wallets in state:  ${allWallets.length}`);
+    console.log(`Funded wallets:          ${fundedWallets.length}`);
+    console.log(`Batch size (CIDs/tx):    ${BATCH_SIZE}`);
+    console.log(`Duration limit (ms):     ${DURATION_MS}`);
+    console.log(`Workers per RPC:         ${WORKERS_PER_RPC}`);
+    console.log(`RUN_ID_BASE:             ${RUN_ID_BASE}`);
+    console.log("");
+
+    // One provider per RPC
+    const providers = rpcUrls.map((u) => new JsonRpcProvider(u));
+
+    // Shared wallet index across all workers
+    let nextWalletIndex = 0;
+    const totalWallets = fundedWallets.length;
+
+    const startMs = Date.now();
+    const deadlineMs = startMs + DURATION_MS;
+
+    // Stats
+    let sentCount = 0;
+    let failedCount = 0;
+
+    // Worker logic for a single RPC
+    async function worker(rpcIdx: number, workerId: number) {
+        const provider = providers[rpcIdx];
+
+        while (true) {
+            const now = Date.now();
+            if (now >= deadlineMs) {
+                return;
+            }
+
+            const myIndex = nextWalletIndex++;
+            if (myIndex >= totalWallets) {
+                return;
+            }
+
+            const fw = fundedWallets[myIndex];
+            const wallet = new Wallet(fw.privateKey, provider);
+
+            const runTag = `${RUN_ID_BASE}-rpc${rpcIdx}-w${workerId}-widx${myIndex}`;
+            const events = buildCidEvents(runTag, BATCH_SIZE);
+
+            try {
+                const cidRollup = new ethers.Contract(
+                    CID_ROLLUP_ADDRESS,
+                    (cidRollupArtifact as any).abi,
+                    wallet,
+                );
+
+                const t0 = Date.now();
+                const tx = await cidRollup.submitCidBatch(events);
+
+                const sendMs = Date.now() - t0;
+                sentCount++;
+
+                console.log(
+                    `[RPC ${rpcIdx} W${workerId}] wallet=${fw.address} ` +
+                    `batch=${BATCH_SIZE} txHash=${tx.hash} sendMs=${sendMs}`,
+                );
+                // DO NOT await tx.wait(); just loop on to next wallet (if time left).
+            } catch (err: any) {
+                failedCount++;
+                const msg =
+                    err?.shortMessage ??
+                    err?.reason ??
+                    err?.error?.message ??
+                    err?.message ??
+                    String(err);
+                console.log(
+                    `[RPC ${rpcIdx} W${workerId}] ❌ FAILED wallet=${fw.address} ` +
+                    `batch=${BATCH_SIZE} reason=${msg}`,
+                );
+            }
+
+            // NEW: wait 50ms before going for the next one
+            await sleep(100);
+        }
+    }
+
+    // Launch workers: WORKERS_PER_RPC for each RPC
+    const workerPromises: Promise<void>[] = [];
+    rpcUrls.forEach((_u, rpcIdx) => {
+        for (let w = 0; w < WORKERS_PER_RPC; w++) {
+            workerPromises.push(worker(rpcIdx, w));
+        }
+    });
+
+    await Promise.all(workerPromises);
+
+    const totalMs = Date.now() - startMs;
+
+    console.log("\n=== CID multiwallet flood summary ===");
+    console.log(`Total funded wallets:     ${fundedWallets.length}`);
+    console.log(`Total tx attempts:        ${sentCount + failedCount}`);
+    console.log(`Successful tx sends:      ${sentCount}`);
+    console.log(`Failed sends:             ${failedCount}`);
+    console.log(`Elapsed time (ms):        ${totalMs}`);
     console.log(
-        `Prepared ${events.length} CidEvent entries. Calling submitCidBatch...`,
+        `Approx tx/s (send only):  ${
+            totalMs > 0 ? ((sentCount * 1000) / totalMs).toFixed(2) : "0.00"
+        }`,
     );
-
-    // Measure timing: send + mined
-    const t0 = Date.now();
-    const tx = await cidRollup.submitCidBatch(events);
-    const t1 = Date.now();
-
-    console.log("submitCidBatch tx hash:", tx.hash);
-    console.log(`Time to send tx (ms):   ${t1 - t0}`);
-
-    const receipt = await tx.wait();
-    const t2 = Date.now();
-
-    console.log("Tx mined in block:", receipt?.blockNumber?.toString());
-    console.log("Gas used:", receipt?.gasUsed?.toString());
-    console.log(`Total time to mined (ms): ${t2 - t0}`);
 }
 
 main().catch((err) => {
-    console.error("Error in CID batch benchmark script:", err);
+    console.error("Fatal error in cid-anchor-multiwallet-30s:", err);
     process.exit(1);
 });

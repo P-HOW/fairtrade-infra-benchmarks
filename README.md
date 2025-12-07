@@ -168,3 +168,47 @@ You can change these constants at the top of scripts/distribute-op-faucet.ts:
 - TARGET_WALLET_COUNT – how many wallets to generate and fund in total.
 - GAS_BUFFER_WEI – minimum ETH (in wei) to keep on the funder wallet as a safety buffer.
 - PER_TX_DELAY_MS – delay (in milliseconds) between transactions to avoid RPC rate limits.
+
+## FairTrade Batch Operation Walkthrough
+
+Script: `scripts/run-fairtrade-batch-ops.ts`  
+Network: Optimism Sepolia  
+RPC: `https://opt-sepolia.g.alchemy.com/v2/wehjZRRb7NBxavvr5DW5c`
+
+Contracts used:
+- `ActorRegistry`: `0xFb451B3Bfb497C54719d0DB354a502a9D9cE38C1`
+- `CidRollup`: `0xC6d171F707bA43BdF490362a357D975B76976264`
+
+Sender (and registered actor):  
+`0xde701e967ea625451819f95bC461e9Fcf8c507df`
+
+Batch tag for this run: `1765113054419`
+
+The script walks a single **traceable coffee batch** through the six FairTrade step types, anchoring one CID-event per on-chain transaction and waiting for confirmation after each tx. This directly realises the per-batch model used in the paper (∑ₛ nₛ = 13 CID anchors).
+
+---
+
+### Per-step summary
+
+| StepType   | Enum value | nₛ (ops per batch) | # tx sent | Block range        | Avg gas / tx | Gas range    |
+|-----------:|-----------:|--------------------:|---------:|--------------------|-------------:|-------------:|
+| Produced   | 1          | 1                  | 1        | 36,655,258         | 62,847       | 62,847       |
+| Processed  | 2          | 2                  | 2        | 36,655,261–36,655,263 | 62,841    | 62,835–62,847 |
+| Shipped    | 3          | 4                  | 4        | 36,655,263–36,655,266 | 62,838    | 62,823–62,847 |
+| Received   | 4          | 4                  | 4        | 36,655,269–36,655,274 | 62,844    | 62,835–62,847 |
+| AtRetail   | 5          | 1                  | 1        | 36,655,276         | 62,847       | 62,847       |
+| Sold       | 6          | 1                  | 1        | 36,655,276         | 62,847       | 62,847       |
+
+All transactions were confirmed successfully, with gas usage tightly concentrated around **≈ 6.28 × 10⁴ gas** per CID-anchor event.
+
+---
+
+### Global metrics for the batch
+
+| Metric                                  | Value      |
+|----------------------------------------|-----------:|
+| Total CID-anchor operations ∑ₛ nₛ      | **13**     |
+| Total gas over all operations          | **816,951** |
+| Average gas per CID anchor             | **62,842** |
+
+This single-batch walkthrough provides a concrete, chain-level realisation of the theoretical model used in Section 4.8: a realistic FairTrade coffee batch generates 13 CID-anchor events across the six lifecycle steps, each costing ~6.3×10⁴ gas on Optimism Sepolia under the current contract design.
