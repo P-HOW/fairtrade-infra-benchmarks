@@ -16,6 +16,7 @@
     - [Faucet & Actor Management](#faucet--actor-management)
     - [Deployment & Project Tooling](#deployment--project-tooling)
     - [Evidence Verifiability Simulation (IPFS RPC)](#evidence-verifiability-simulation-ipfs-rpc)
+    - [Audit Reconstruction (On-chain Logs)](#audit-reconstruction-on-chain-logs)
     - [Minimal Example](#minimal-example)
 5. [FairTrade Batch Example](#fairtrade-batch-example)
 6. [Environment & Prerequisites](#environment--prerequisites)
@@ -34,6 +35,7 @@ This repository contains a compact Hardhat 3 project that implements and benchma
 - **Payments:** A simple router splits FairTrade premiums across stakeholders.
 - **Benchmarks:** TypeScript scripts measure gas costs and approximate transactions-per-second for different Optimism Sepolia RPC setups.
 - **Evidence verifiability (added):** A simulation script validates that off-chain evidence stored via an IPFS RPC endpoint is retrievable by CID and re-hashes to the same CID after retrieval (integrity verification). This supports paper-style “evidence verifiability” metrics.
+- **Audit reconstruction (added):** A script reconstructs an auditable batch timeline from on-chain logs across `CidRollup`, `DocumentRegistry`, and `ProcessManager`, producing a machine-readable JSON report plus a human-readable timeline.
 
 The goal is to provide **realistic, reproducible benchmarks** for a FairTrade-like workflow (e.g., coffee batches) while keeping the on-chain footprint small enough to be practical for low-margin supply chains.
 
@@ -210,9 +212,9 @@ Multi-wallet flood of `CidRollup.submitCidBatch` calls across multiple private O
 
 - **Invocation**
 
-  ```bash
-  npx tsx scripts/benchmark-cid-batch.ts
-
+```bash
+npx tsx scripts/benchmark-cid-batch.ts
+````
 
 * **Inputs**
 
@@ -252,9 +254,9 @@ Single-RPC multi-wallet RPS benchmark for an Infura Optimism Sepolia endpoint.
 
 * **Invocation**
 
-  ```bash
-  npx tsx scripts/benchmark-op-infura-multiwallet.ts
-  ```
+```bash
+npx tsx scripts/benchmark-op-infura-multiwallet.ts
+```
 
 * **Inputs**
 
@@ -287,9 +289,9 @@ Benchmark multiple OP Sepolia RPC endpoints with bounded concurrency.
 
 * **Invocation**
 
-  ```bash
-  npx tsx scripts/benchmark-op-rpcs.ts
-  ```
+```bash
+npx tsx scripts/benchmark-op-rpcs.ts
+```
 
 * **Inputs**
 
@@ -324,9 +326,9 @@ Binary search for the maximum `CidRollup.submitCidBatch` size that fits within g
 
 * **Invocation**
 
-  ```bash
-  npx tsx scripts/estimate-cid-batch-limit.ts
-  ```
+```bash
+npx tsx scripts/estimate-cid-batch-limit.ts
+```
 
 * **Inputs**
 
@@ -366,11 +368,11 @@ Distribute OP Sepolia ETH from a funder wallet to a pool of test wallets.
 
 * **Invocation**
 
-  ```bash
-  npx hardhat run scripts/distribute-op-faucet.ts --network opSepolia
-  # or
-  npx tsx scripts/distribute-op-faucet.ts
-  ```
+```bash
+npx hardhat run scripts/distribute-op-faucet.ts --network opSepolia
+# or
+npx tsx scripts/distribute-op-faucet.ts
+```
 
 * **Inputs**
 
@@ -391,12 +393,6 @@ Distribute OP Sepolia ETH from a funder wallet to a pool of test wallets.
         * `address`, `privateKey`, `funded` for each wallet.
     * Logs describing per-wallet funding and remaining unfunded count.
 
-* **Tuning tips**
-
-    * Increase `TARGET_WALLET_COUNT` if you need more parallel senders; this will also spread the available balance thinner.
-    * Raise `PER_TX_DELAY_MS` if you hit rate limits; lower it if your RPC is tolerant and you want faster runs.
-    * Adjust `GAS_BUFFER_WEI` to control how aggressively the script spends the funder’s balance.
-
 ---
 
 #### `scripts/register-actors-from-faucet.ts`
@@ -409,34 +405,9 @@ Registers funded faucet wallets as `Producer` actors in `ActorRegistry`.
 
 * **Invocation**
 
-  ```bash
-  npx tsx scripts/register-actors-from-faucet.ts
-  ```
-
-* **Inputs**
-
-    * **Env vars**
-
-        * `OP_SEPOLIA_RPC_URL`
-        * `OP_SEPOLIA_PRIVATE_KEY` – must correspond to `ActorRegistry.owner()`.
-        * `ACTOR_REGISTRY_ADDRESS` *(optional)* – defaults to the deployed OP Sepolia address.
-        * `REGISTER_MIN_BALANCE_ETH` *(optional)* – minimum balance to consider a wallet “funded” (default `0.0000001`).
-        * `REGISTER_BALANCE_CONCURRENCY` *(optional)* – concurrency for balance checks (capped at `1`).
-        * `REGISTER_REGISTER_CONCURRENCY` *(optional)* – concurrency for registrations (capped at `1`).
-    * **Files**
-
-        * `op-sepolia-faucet-wallets-batch.json` – produced by the faucet script.
-
-* **Outputs**
-
-    * For each qualifying wallet, a `registerActor` transaction as `Role.Producer`.
-    * Summary of how many wallets had funds, how many were newly registered, and how many failed.
-
-* **Tuning tips**
-
-    * If you only care about a subset of wallets, reduce `TARGET_WALLET_COUNT` or edit the faucet file.
-    * Keep the concurrency settings at `1` if your RPC is fragile; increase slightly only if you understand the rate limits.
-    * `REGISTER_MIN_BALANCE_ETH` can be raised if you want to ignore near-empty wallets.
+```bash
+npx tsx scripts/register-actors-from-faucet.ts
+```
 
 ---
 
@@ -450,25 +421,9 @@ Generate a single throwaway test wallet.
 
 * **Invocation**
 
-  ```bash
-  npx tsx scripts/gen-test-wallet.ts
-  ```
-
-* **Inputs**
-
-    * None.
-
-* **Outputs**
-
-    * Prints:
-
-        * Generated address.
-        * Private key.
-        * Suggested `.env` line: `OP_SEPOLIA_PRIVATE_KEY=...`.
-
-* **Tuning tips**
-
-    * There are no parameters; use as-is and make sure the printed private key does not end up in version control.
+```bash
+npx tsx scripts/gen-test-wallet.ts
+```
 
 ---
 
@@ -478,42 +433,11 @@ Generate a single throwaway test wallet.
 
 Deploy the FairTrade infra contracts to OP Sepolia and record the addresses.
 
-* **Purpose**
-
-    * One-shot deployer for `ActorRegistry`, `DocumentRegistry`, `ProcessManager`, `CidRollup`, and `PaymentRouter`.
-
 * **Invocation**
 
-  ```bash
-  npx hardhat run scripts/deploy-op-sepolia.ts --network opSepolia
-  ```
-
-* **Inputs**
-
-    * **Env vars**
-
-        * `OP_SEPOLIA_RPC_URL`
-        * `OP_SEPOLIA_PRIVATE_KEY` – deployer address; becomes `ActorRegistry.owner()` and initial `PaymentRouter` recipient.
-    * Uses artifacts from `artifacts/contracts`.
-
-* **Outputs**
-
-    * Deploys any missing contracts and writes/updates `op-sepolia-deployments.json`:
-
-      ```json
-      {
-        "ActorRegistry": "0x...",
-        "DocumentRegistry": "0x...",
-        "ProcessManager": "0x...",
-        "CidRollup": "0x...",
-        "PaymentRouter": "0x..."
-      }
-      ```
-
-* **Tuning tips**
-
-    * If you redeploy individual contracts, delete their entry from `op-sepolia-deployments.json` to force a fresh deployment.
-    * For multi-env setups, you can copy or rename the deployments file per network.
+```bash
+npx hardhat run scripts/deploy-op-sepolia.ts --network opSepolia
+```
 
 ---
 
@@ -521,31 +445,11 @@ Deploy the FairTrade infra contracts to OP Sepolia and record the addresses.
 
 Emit a textual snapshot of the project into `project_snapshot.txt`.
 
-* **Purpose**
-
-    * Produce a self-contained textual dump of key source files (contracts, scripts, tests) for archival or analysis.
-
 * **Invocation**
 
-  ```bash
-  npx tsx scripts/dump-project.ts
-  ```
-
-* **Inputs**
-
-    * Uses in-script constants:
-
-        * `FOLDERS = ["contracts", "scripts", "src", "test"]`.
-        * `ALLOWED_EXTENSIONS = [".sol", ".ts", ".js"]`.
-
-* **Outputs**
-
-    * `project_snapshot.txt` at the repository root, with each file delimited by `>>> BEGIN FILE` / `<<< END FILE`.
-
-* **Tuning tips**
-
-    * Add/remove entries in `FOLDERS` or `ALLOWED_EXTENSIONS` if you want a different snapshot scope.
-    * The script ignores `.d.ts` files by design.
+```bash
+npx tsx scripts/dump-project.ts
+```
 
 ---
 
@@ -598,8 +502,6 @@ npx tsx scripts/sim-filebase-evidence.ts
 
 #### Reference run results (2026-02-23)
 
-Run produced:
-
 * `objects_total: 40`
 * `upload_success: 40`
 * `fetch_success: 40`
@@ -612,34 +514,84 @@ Run produced:
 
 ---
 
-### Minimal Example
+## Audit Reconstruction (On-chain Logs)
 
-#### `scripts/send-op-tx.ts`
+### `scripts/reconstruct-audit-from-logs.ts`
+
+This script reconstructs an auditable batch timeline from on-chain logs for a given `productId`.
+
+**It answers:** “Given a batch ID, can an auditor reconstruct the full chain-of-custody and evidence pointers purely from immutable logs?”
+
+#### What it does
+
+* Queries logs from:
+
+    * `CidRollup` events (CID anchors per step)
+    * `DocumentRegistry` events (evidence/document anchors)
+    * `ProcessManager` events (process creation and status transitions)
+* Filters by indexed `productId`
+* Sorts by `(blockNumber, logIndex)` (canonical chain order)
+* Decodes key fields into a unified event timeline
+* Prints a readable timeline and writes a machine-readable JSON report
+
+#### Usage
+
+```bash
+# productId can be a string (hashed to bytes32 in-script)
+npx tsx scripts/reconstruct-audit-from-logs.ts --productId "coffee-batch-001" --lookback 200000
+
+# or a bytes32 hex productId
+npx tsx scripts/reconstruct-audit-from-logs.ts --productId 0x<64-hex-chars> --fromBlock 39900000 --toBlock 40100000
+```
+
+#### Inputs
+
+**Env vars**
+
+* `OP_SEPOLIA_RPC_URL` (required)
+
+Optional overrides (otherwise defaults to README deployment addresses):
+
+* `CID_ROLLUP_ADDRESS`
+* `DOCUMENT_REGISTRY_ADDRESS`
+* `PROCESS_MANAGER_ADDRESS`
+
+**CLI flags**
+
+* `--productId` (required)
+* `--lookback` (optional)
+* `--fromBlock`, `--toBlock` (optional)
+* `--out` (optional)
+
+#### Output
+
+* Prints a merged timeline of events in chronological chain order.
+* Writes a JSON report: `audit_reconstruction_<productIdPrefix>.json` with:
+
+    * `summary` (counts, scan bounds, completeness proxy)
+    * `events[]` (decoded events with timestamps and tx hashes)
+
+#### Practical note on RPC rate limits
+
+Some RPC providers limit the `eth_getLogs` block range per request (free tiers can be as low as 10 blocks). If you see errors like “block range should work: [a,b]”, use:
+
+* a different RPC from `OP_SEPOLIA_PUBLIC_RPCS_JSON`, or
+* chunked scanning (the script is designed to support this), or
+* an indexer (recommended for production).
+
+---
+
+## Minimal Example
+
+### `scripts/send-op-tx.ts`
 
 Minimal Hardhat 3 example for sending a transaction on an OP-style chain.
 
-* **Purpose**
-
-    * Demonstrate `network.connect({ network: "hardhatOp", chainType: "op" })` usage and a trivial L2 transaction.
-
 * **Invocation**
 
-  ```bash
-  npx hardhat run scripts/send-op-tx.ts --network hardhatOp
-  ```
-
-* **Inputs**
-
-    * Hardhat 3 config must define a `hardhatOp` network with `chainType: "op"`.
-
-* **Outputs**
-
-    * Sends 1 wei from the default signer to itself.
-    * Logs the sender address and tx status.
-
-* **Tuning tips**
-
-    * Useful as a smoke test for OP configuration before running the heavier benchmark scripts.
+```bash
+npx hardhat run scripts/send-op-tx.ts --network hardhatOp
+```
 
 ---
 
